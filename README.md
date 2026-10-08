@@ -1,4 +1,5 @@
-# Whitebirch_et_al._2026
+# Whitebirch_python
+formerly Whitebirch_et_al._2026
 Python code used for analysis of self-administration behavior (raw files from Med-PC) and fiber photometry (primarily for data acquired using Doric equipment and software, though prelminary code for TDT data as well), related to Whitebirch et al., 2026 (in preparation). 
 All code was written in Jupyter Lab by A. C. Whitebirch, Ferguson Laboratory, University of Washington. 
 
