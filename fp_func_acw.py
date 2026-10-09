@@ -321,7 +321,7 @@ def doric_extract_stream_data(h5file, blockname):
 # batch processing of a folder containing Doric files
 # this pipeline manager function uses the above extraction functions
 
-def doric_fipho_data_extraction(dir_raw, dir_extracted):
+def doric_fipho_data_extraction_old(dir_raw, dir_extracted):
 
     # list comprehension to find files
     raw_files = [f for f in os.listdir(dir_raw) if f.endswith('.doric')]
@@ -385,6 +385,94 @@ def doric_fipho_data_extraction(dir_raw, dir_extracted):
                     print(f"✅ Saved: {epoc_outfile}")
                 else:
                     print("⚠️ No epoch data to save.")
+
+        except Exception as e:
+            print(f"❌ Failed to process {filename}: {e}")
+
+
+
+# batch processing of a folder containing Doric files
+# this pipeline manager function uses the above extraction functions
+# updated to create empty epoch files when no events occurred
+
+def doric_fipho_data_extraction(dir_raw, dir_extracted):
+
+    # list comprehension to find files
+    raw_files = [f for f in os.listdir(dir_raw) if f.endswith('.doric')]
+    processed = set(os.path.splitext(f)[0].replace('_streams_data', '').replace('_epocs_data', '')
+                    for f in os.listdir(dir_extracted) if f.endswith('.feather'))
+
+    files_to_process = [f for f in raw_files if os.path.splitext(f)[0] not in processed]
+
+    if not files_to_process:
+        print(f"✅ All files in '{dir_raw}' have already been processed.")
+        return
+
+    print(f"\n📁 Extracting from: {dir_raw}")
+    print(f"📤 Saving to: {dir_extracted}")
+
+    for filename in files_to_process:
+        blockname = os.path.splitext(filename)[0] # split to extract the name of the session / recording 
+        full_path = os.path.join(dir_raw, filename)
+
+        print(f"\n🔍 Processing {filename} ...")
+
+        try:
+            # use read mode to access the HDf5 file contents
+            with h5py.File(full_path, 'r') as f:
+                # Extract streams data and metadata
+                try:
+                    stream_df, streams_info_df = doric_extract_stream_data(f, blockname)
+                except Exception as e:
+                    print(f"⚠️ Failed to extract stream data from {filename}: {e}")
+                    stream_df = pd.DataFrame()
+                    streams_info_df = pd.DataFrame()
+
+                # Extract epochs
+                epoc_failed = False
+                
+                try:
+                    epoc_df = doric_extract_epoch_data(f)
+                    epoc_df["blockname"] = blockname
+                except Exception as e:
+                    print(f"⚠️ Failed to extract epoch data from {filename}: {e}")
+                    epoc_df = pd.DataFrame()
+                    epoc_failed = True
+                    
+                    
+                # Save data as a feather file, fast binary pandas format
+                if not stream_df.empty:
+                    stream_outfile = os.path.join(dir_extracted, f"{blockname}_streams_data.feather")
+                    stream_df.reset_index(drop=True).to_feather(stream_outfile)
+                    print(f"✅ Saved: {stream_outfile}")
+                else:
+                    print("⚠️ No stream data to save.")
+
+                # Save metadata
+                if not streams_info_df.empty:
+                    info_outfile = os.path.join(dir_extracted, f"{blockname}_streams_info.feather")
+                    streams_info_df.reset_index(drop=True).to_feather(info_outfile)
+                    print(f"✅ Saved: {info_outfile}")
+                else:
+                    print("⚠️ No streams info to save.")
+
+                # Save epoch data
+                if not epoc_failed:
+                    if epoc_df.empty:
+                        epoc_df = pd.DataFrame({
+                            'blockname': pd.Series(dtype=str),
+                            'source_path': pd.Series(dtype=str),
+                            'input code': pd.Series(dtype=str),
+                            'onset': pd.Series(dtype=float),
+                        })
+                        print("ℹ️ No epoch events found; saving empty epoch file.")
+ 
+                    epoc_outfile = os.path.join(dir_extracted, f"{blockname}_epocs_data.feather")
+                    epoc_df.reset_index(drop=True).to_feather(epoc_outfile)
+                    print(f"✅ Saved: {epoc_outfile}")
+            
+                else:
+                    print("⚠️ Epoch extraction failed; no epoch file saved.")
 
         except Exception as e:
             print(f"❌ Failed to process {filename}: {e}")
