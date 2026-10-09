@@ -2,3 +2,5 @@
 last_paths.json 
 __pycache__/
 *.pyc
+
+.DS_Store
