@@ -1413,8 +1413,8 @@ def streams_trim_events_doric(isos_405_filt_downsamp, GCaMP_465_filt_downsamp,
         ax1.set_ylabel('405 (mV)', color=[0.7, 0.7, 0.7])
         ax2.set_ylabel('465 (mV)', color=[0, 1, 0])
         ax1.set_title(title)
-        ax1.set_ylim(0, 1.0)
-        ax2.set_ylim(0, 1.0)
+        ax1.set_ylim(0, 0.3)
+        ax2.set_ylim(0, 0.3)
 
         if ylim1 is not None:
             ax1.set_ylim(ylim1)
