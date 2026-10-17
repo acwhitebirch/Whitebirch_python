@@ -889,7 +889,7 @@ def streams_peek_ratpack_tdt_or_doric(streams_info, streams_data, box_to_rat, zo
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 # updated documentation 07.20.26
 
-def remove_artifacts_dual_signal(
+def remove_artifacts_dual_signal_101626(
     time_vector,
     signal1,
     signal2,
@@ -934,11 +934,12 @@ def remove_artifacts_dual_signal(
         drop_mask_sudden[exclusion_samples:] = diff_signal[exclusion_samples:] < -sudden_drop_threshold
         # combine the two boolen arrays
         drop_mask = drop_mask_amp | drop_mask_sudden
-
+       
+        
         # this nd_label comes from scipy, it labels discrete artifacts (e.g. consecutive True points in the drop_mask are a single artifact)
         labeled, num_features = nd_label(drop_mask)
         # a buffer is used to ensure the entire artifact is removed along with onset / offset effects
-        buffer = int(0.1 * sampling_rate)
+        buffer = int(0.01 * sampling_rate)
         
         # this loop addes the buffer samples to flank each artifact, using the output of nd_label
         # artifacts that don't satisfy criteria (e.g. for duration) are ignored
@@ -1058,6 +1059,203 @@ def remove_artifacts_dual_signal(
         plt.show()
 
     return signal1_clean, signal2_clean
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+# updated documentation 10.16.26 to detect upward artifacts as well
+
+def remove_artifacts_dual_signal(
+    time_vector,
+    signal1,
+    signal2,
+    threshold_drop_signal1=0.15,
+    threshold_rise_signal1=0.15,
+    threshold_drop_signal2=0.05,
+    threshold_rise_signal2=0.05,
+    sudden_drop_threshold_signal1=0.1,
+    sudden_rise_threshold_signal1=0.1,
+    sudden_drop_threshold_signal2=0.03,
+    sudden_rise_threshold_signal2=0.03,
+    min_artifact_duration=1,
+    max_artifact_duration=500,
+    sampling_rate=100,
+    median_filter_size=11,
+    baseline_exclusion_seconds=0,
+    manual_windows=None,  # list of (start, end) in seconds
+    plot=True,
+    signal1_label='Signal 1',
+    signal2_label='Signal 2',
+    zoom_start=60,
+    zoom_window=120
+):
+    # define a sub-function for the artifact detection and rejection
+    # the artifact detection is based on a drop in amplitude below a certain threshold, 
+    # because the Doric wireless system has periodic "drops" in signal where the amplitude plummets essentially in negative square pulses
+    
+    def clean_signal(signal, threshold_drop, threshold_rise, sudden_drop_threshold, sudden_rise_threshold, signal_name):
+        signal = np.array(signal)
+        cleaned = signal.copy() # preserve the original signal
+
+        # the beginning may be excluded, e.g. because that recording period includes LEDs turning on, headstage placement, etc. 
+        exclusion_samples = int(baseline_exclusion_seconds * sampling_rate) 
+        
+        # the purpose of the median filter is to provide a comparison "signal" to detect sharp deviations in local amplitude
+        baseline = median_filter(signal, size=median_filter_size)
+
+        # Automatic artifact detection
+        # firstly, create a boolean array of false 
+        drop_mask_amp = np.zeros_like(signal, dtype=bool)
+        # boolean mask is updated to detect deviations larger than the threshold
+        drop_mask_amp[exclusion_samples:] = (baseline[exclusion_samples:] - signal[exclusion_samples:]) > (threshold_drop * baseline[exclusion_samples:])
+        # repeat with another boolean mask, this one using the differential to detect sudden drops across samples (common with the Doric signal "drops")
+        diff_signal = np.diff(signal, prepend=signal[0])
+        drop_mask_sudden = np.zeros_like(signal, dtype=bool)
+        drop_mask_sudden[exclusion_samples:] = diff_signal[exclusion_samples:] < -sudden_drop_threshold
+        
+        # Automatic artifact detection — upward (mirrors the downward logic)
+        rise_mask_amp = np.zeros_like(signal, dtype=bool)
+        rise_mask_amp[exclusion_samples:] = (signal[exclusion_samples:] - baseline[exclusion_samples:]) > (threshold_rise * baseline[exclusion_samples:])
+
+        rise_mask_sudden = np.zeros_like(signal, dtype=bool)
+        rise_mask_sudden[exclusion_samples:] = diff_signal[exclusion_samples:] > sudden_rise_threshold
+
+        # combine all four boolean arrays
+        drop_mask = drop_mask_amp | drop_mask_sudden | rise_mask_amp | rise_mask_sudden
+        
+        
+        # this nd_label comes from scipy, it labels discrete artifacts (e.g. consecutive True points in the drop_mask are a single artifact)
+        labeled, num_features = nd_label(drop_mask)
+        # a buffer is used to ensure the entire artifact is removed along with onset / offset effects
+        buffer = int(0.01 * sampling_rate)
+        
+        # this loop addes the buffer samples to flank each artifact, using the output of nd_label
+        # artifacts that don't satisfy criteria (e.g. for duration) are ignored
+        # numpy interpolation is performed between the identified indices for each artifact
+      
+        for i in range(1, num_features + 1):
+            indices = np.where(labeled == i)[0]
+            start_idx = max(indices[0] - buffer, 0)
+            end_idx = min(indices[-1] + buffer, len(signal) - 1)
+            indices_expanded = np.arange(start_idx, end_idx + 1)
+            duration = len(indices_expanded)
+
+            if duration < min_artifact_duration or duration > max_artifact_duration:
+                continue
+            if start_idx == 0 or end_idx >= len(signal) - 1:
+                continue
+            if start_idx < exclusion_samples:
+                continue
+                
+            # Interpolate: x are the indices to keep, flanking the artifact, and y are the values at those indices
+
+            x = [start_idx - 1, end_idx + 1]
+            y = [cleaned[start_idx - 1], cleaned[end_idx + 1]]
+            cleaned[indices_expanded] = np.interp(indices_expanded, x, y)
+
+        # Manual artifact interpolation
+        if manual_windows is not None:
+            for start_sec, end_sec in manual_windows:
+                start_idx = np.searchsorted(time_vector, start_sec) # find the indices corresponding to specific time points
+                end_idx = np.searchsorted(time_vector, end_sec)
+                if start_idx == 0 or end_idx >= len(signal) - 1:
+                    continue
+                indices_manual = np.arange(start_idx, end_idx + 1)
+                x = [start_idx - 1, end_idx + 1]
+                y = [cleaned[start_idx - 1], cleaned[end_idx + 1]]
+                cleaned[indices_manual] = np.interp(indices_manual, x, y)
+
+        return cleaned, baseline
+
+    # Clean both signals
+    signal1_clean, signal1_baseline = clean_signal(
+        signal1, threshold_drop_signal1, threshold_rise_signal1,
+        sudden_drop_threshold_signal1, sudden_rise_threshold_signal1, signal1_label
+    )
+    signal2_clean, signal2_baseline = clean_signal(
+        signal2, threshold_drop_signal2, threshold_rise_signal2,
+        sudden_drop_threshold_signal2, sudden_rise_threshold_signal2, signal2_label
+    )
+
+    if plot:
+        plt.style.use('dark_background')
+        ts = np.array(time_vector)
+
+        signal1 = np.array(signal1)
+        signal2 = np.array(signal2)
+        signal1_clean = np.array(signal1_clean)
+        signal2_clean = np.array(signal2_clean)
+
+        signal1_ylim = [np.min(signal1) * 0.9, np.max(signal1) * 1.1]
+        signal2_ylim = [np.min(signal2) * 0.9, np.max(signal2) * 1.1]
+
+        fig, ax1 = plt.subplots(figsize=(12, 5))
+
+        # Plot raw and cleaned Signal 1
+        ax1.plot(ts, signal1, color='yellow', linewidth=4, alpha=0.3, label=f'{signal1_label} (raw)', zorder=1)
+        ax1.plot(ts, signal1_clean, color=[0.1, 0.7, 0.2], linewidth=2, label=f'{signal1_label} (cleaned)', zorder=3)
+        ax1.set_ylabel(f'{signal1_label}', color='lightgreen')
+        ax1.set_ylim(signal1_ylim)
+
+        # Plot raw and cleaned Signal 2
+        ax2 = ax1.twinx()
+        ax2.plot(ts, signal2, color='magenta', linewidth=4, alpha=0.3, label=f'{signal2_label} (raw)', zorder=1)
+        ax2.plot(ts, signal2_clean, color=[0.7, 0.7, 0.7], linewidth=2, label=f'{signal2_label} (cleaned)', zorder=3)
+        ax2.set_ylabel(f'{signal2_label}', color='gray')
+        ax2.set_ylim(signal2_ylim)
+
+        ax1.set_xlabel('Time (seconds)')
+        plt.title('Artifact Removal: Raw vs Cleaned Signals')
+
+        # Zoom overlay
+        ax1.axvspan(zoom_start, zoom_start + zoom_window, color='blue', alpha=0.1, label='Zoom window')
+
+        # Manual interpolation overlays
+        if manual_windows is not None:
+            for i, (start_sec, end_sec) in enumerate(manual_windows):
+                lbl = 'Manual interpolation' if i == 0 else None  # avoid duplicate legend entries
+                ax1.axvspan(start_sec, end_sec, color='red', alpha=0.2, label=lbl)
+
+        # Combine legends
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+
+        plt.tight_layout()
+        plt.show()
+
+        # Zoomed-in plot
+        fig_zoom, ax1_zoom = plt.subplots(figsize=(12, 4))
+        zoom_mask = (ts >= zoom_start) & (ts <= zoom_start + zoom_window)
+        ax1_zoom.plot(ts[zoom_mask], signal1[zoom_mask], color='yellow', linewidth=2, label=f'{signal1_label} (raw)', zorder=1)
+        ax1_zoom.plot(ts[zoom_mask], signal1_baseline[zoom_mask], color='red', linewidth=2, label=f'{signal1_label} (median filter)', zorder=5)
+        ax1_zoom.plot(ts[zoom_mask], signal1_clean[zoom_mask], color=[0.1, 0.7, 0.2], linewidth=2, label=f'{signal1_label} (cleaned)', zorder=3)
+        ax2_zoom = ax1_zoom.twinx()
+        ax2_zoom.plot(ts[zoom_mask], signal2[zoom_mask], color='magenta', linewidth=2, label=f'{signal2_label} (raw)', zorder=1)
+        ax2_zoom.plot(ts[zoom_mask], signal2_baseline[zoom_mask], color='red', linewidth=2, label=f'{signal2_label} (median filter)', zorder=5)
+        ax2_zoom.plot(ts[zoom_mask], signal2_clean[zoom_mask], color=[0.7, 0.7, 0.7], linewidth=2, label=f'{signal2_label} (cleaned)', zorder=3)
+
+        ax1_zoom.set_ylabel(f'{signal1_label}', color='lightgreen')
+        ax2_zoom.set_ylabel(f'{signal2_label}', color='gray')
+        ax1_zoom.set_xlabel('Time (seconds)')
+        plt.title(f'Zoomed-In View: {zoom_start:.1f} to {zoom_start + zoom_window:.1f} sec')
+
+        # Manual interpolation overlays in zoom
+        if manual_windows is not None:
+            for i, (start_sec, end_sec) in enumerate(manual_windows):
+                lbl = 'Manual interpolation' if i == 0 else None
+                ax1_zoom.axvspan(start_sec, end_sec, color='cyan', alpha=0.2, label=lbl)
+
+        # Combine zoom legends
+        lines1, labels1 = ax1_zoom.get_legend_handles_labels()
+        lines2, labels2 = ax2_zoom.get_legend_handles_labels()
+        ax1_zoom.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+        plt.tight_layout()
+        plt.show()
+
+    return signal1_clean, signal2_clean
+
 
 
 
@@ -4652,8 +4850,25 @@ def epoc_streams(
         elif isinstance(subset, str) and subset.startswith("last"):
             num = int(subset.replace("last", ""))
             event_indices = event_indices.iloc[-num:]
-        elif isinstance(subset, (tuple, list)) and len(subset) == 2:
-            event_indices = event_indices.iloc[subset[0]:subset[1]]
+        elif isinstance(subset, tuple) and len(subset) == 2:
+            start, end = subset
+            n_events = len(event_indices)
+            if start < 1 or end > n_events or start > end:
+                raise ValueError(
+                    f"subset range {subset} is invalid "
+                    f"(valid range: 1 to {n_events})."
+                )
+            event_indices = event_indices.iloc[start - 1 : end]
+        elif isinstance(subset, list):
+            # Custom explicit selection, 1-indexed event numbers
+            n_events = len(event_indices)
+            valid_subset = [i for i in subset if 1 <= i <= n_events]
+            if len(valid_subset) < len(subset):
+                skipped = [i for i in subset if i not in valid_subset]
+                print(f"⚠️ Event '{event}': skipped subset indices not present "
+                      f"(only {n_events} occurrence(s) available): {skipped}")
+            zero_indexed = [i - 1 for i in valid_subset]
+            event_indices = event_indices.iloc[zero_indexed]
         else:
             raise ValueError("Invalid subset format.")
 
@@ -5332,7 +5547,7 @@ def run_perievent_pipeline(
     # ----------------------
     def parse_rat(filename):
         fname = Path(filename).stem
-        rat_match = re.search(r'ACW_coh5_IT_[fm]\d+', fname)
+        rat_match = re.search(r'ACW_coh\d+_IT_[fm]\d+', fname)
         return rat_match.group(0) if rat_match else "unknown_rat"
 
     # ----------------------
