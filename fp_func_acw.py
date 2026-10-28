@@ -3799,6 +3799,13 @@ def baselinecorr(ts, isos_405, isos_405_expcorr, GCaMP_465, GCaMP_465_motcorr_ex
 
 def deltaFF(signal, control, ts):
     
+    
+    if control is None:
+        print("⚠️ No control channel provided (control is None) — "
+              "skipping control-based normalization.")
+        return None
+    
+    
     # function to compute deltaF/F using fitted control channel and filtered signal channel
 
     res = np.subtract(signal, control) # numerator of F(t)-f0
@@ -3884,6 +3891,12 @@ def zscore(ts, isos_405, GCaMP_465, tzoom, yzoom=None):
 # updated 08.10.26
 
 def norm_compare(GCaMP_465_zscore, GCaMP_465_dFF, ts, tzoom):
+    
+    if GCaMP_465_dFF is None:
+        print("⚠️ No dFF provided — "
+              "skipping comparison.")
+        return None, None
+    
     
     plt.figure(figsize=(10,7))
     fig_6,ax1=plt.subplots()  # create a plot to allow for dual y-axes plotting
@@ -5992,8 +6005,8 @@ def run_perievent_pipeline(
     # Determine rat order
     # ------------------------------------------------------------
 
-    subject_order = ["m4","f5","m8","f2","m3","m9","m5"]
-    #subject_order = None
+    #subject_order = ["m4","f5","m8","f2","m3","m9","m5"]
+    subject_order = None
     
     if subject_order is not None:
 
