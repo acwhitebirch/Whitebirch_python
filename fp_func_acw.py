@@ -2904,7 +2904,7 @@ def visualize_and_correct_artifacts(
 
     # create the dataframe of events that include cue light illumination (potential light artifacts)
     drug_infusions = epoc_ts_and_indices[
-        epoc_ts_and_indices['event'].str.contains('infusion|cue light', case=False)
+        epoc_ts_and_indices['event'].str.contains('infusion|cue light|houselight', case=False) # add houselight?
     ]
     
     if drug_infusions.empty:
@@ -5744,9 +5744,16 @@ def run_perievent_pipeline(
     # -----------------------
     #rat_str = "-".join(sorted(per_rat_results.keys()))
     rat_str = "_".join([r.split('_')[-1] for r in sorted(per_rat_results.keys())])
+    '''
     within_base = os.path.join(
         save_dir,
         f"{processed_phase}_{rat_str}_{eventname}_within_rat_epoc_bslnd"
+    )
+    '''
+    
+    within_base = os.path.join(
+        save_dir,
+        f"{processed_phase}_{eventname}_within_rat_epoc_bslnd"   # remove rat_str to shorten file name
     )
 
     # Mean trace per rat
@@ -5914,8 +5921,13 @@ def run_perievent_pipeline(
     combined_events_info_trial = pd.concat([matched_file_rows, combined_events_info_trial], ignore_index=True).astype(str)
 
     # Save across-trial files
+    '''
     base_all_trial = os.path.join(save_dir, f"{processed_phase}_{rat_str}_{eventname}_across_trial")
     base_all_trial_fig = os.path.join(fig_output_path, f"{processed_phase}_{rat_str}_{eventname}_across_trial")
+    '''
+    
+    base_all_trial = os.path.join(save_dir, f"{processed_phase}_{eventname}_across_trial")   # remove rat_str to shorten file name
+    base_all_trial_fig = os.path.join(fig_output_path, f"{processed_phase}_{eventname}_across_trial")
 
     safe_save_table(combined_baselined_all, base_all_trial + "_epocs_bslnd")
     safe_save_table(combined_stats_all, base_all_trial + "_stats")
@@ -6171,7 +6183,9 @@ def run_perievent_pipeline(
     plt.show()
 
     # Save figure
-    heatmap_base = os.path.join(fig_output_path, f"{processed_phase}_{rat_str}_{eventname}_all_trials_heatmap")
+    #heatmap_base = os.path.join(fig_output_path, f"{processed_phase}_{rat_str}_{eventname}_all_trials_heatmap")
+    
+    heatmap_base = os.path.join(fig_output_path, f"{processed_phase}_{eventname}_all_trials_heatmap")  # remove rat_str to shorten file name
     safe_save_fig(fig_all_trials, heatmap_base)
     
     
@@ -6312,10 +6326,19 @@ def run_perievent_pipeline(
     plt.show()
 
     # Save figure
+    '''
     heatmap_within_rat_base = os.path.join(
         fig_output_path,
         f"{processed_phase}_{rat_str}_{eventname}_within_rat_heatmap"
     )
+    '''
+    
+    heatmap_within_rat_base = os.path.join(
+        fig_output_path,
+        f"{processed_phase}_{eventname}_within_rat_heatmap"   # remove rat_str to shorten file name
+    )
+    
+    
     safe_save_fig(fig_heatmap_within_rat, heatmap_within_rat_base)
     
     
@@ -6543,6 +6566,7 @@ def run_perievent_pipeline(
     # ---------------------------------
     # Save across-animal outputs
     # ---------------------------------
+    '''
     base_all_animal = os.path.join(
         save_dir,
         f"{processed_phase}_{rat_str}_{eventname}_across_rat"
@@ -6551,6 +6575,17 @@ def run_perievent_pipeline(
     base_all_animal_fig = os.path.join(
         fig_output_path,
         f"{processed_phase}_{rat_str}_{eventname}_across_rat"
+    )
+
+    '''
+    base_all_animal = os.path.join(
+        save_dir,
+        f"{processed_phase}_{eventname}_across_rat"    # removed rat_str to shorten file names...
+    )
+    
+    base_all_animal_fig = os.path.join(
+        fig_output_path,
+        f"{processed_phase}_{eventname}_across_rat"
     )
 
 
@@ -6853,10 +6888,18 @@ def run_perievent_pipeline(
 
         fig_stack.tight_layout()
         
+        '''
         safe_save_fig(
             fig_stack,
             os.path.join(fig_output_path, f"{processed_phase}_{rat_str}_{eventname}_stacked")
         )
+        '''
+        
+        safe_save_fig(
+            fig_stack,
+            os.path.join(fig_output_path, f"{processed_phase}_{eventname}_stacked") # remove rat str to shorten file name
+        )
+        
         plt.show()        
         
     
