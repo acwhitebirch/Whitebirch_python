@@ -5343,6 +5343,7 @@ def run_perievent_pipeline(
     paperfig_path = None,
     master_figsize = (2,2),
     plot_onset_detection=False,
+    save = False
 ):
     import os
     import pandas as pd
@@ -5409,10 +5410,10 @@ def run_perievent_pipeline(
             return default_path
         
     fig_output_path = get_output_path(
-        save_dir,
-        paperfigs,
-        paperfig_path
-    )
+         save_dir,
+         paperfigs,
+         paperfig_path
+      )
     
     #########################################################################################################
     
@@ -5449,110 +5450,114 @@ def run_perievent_pipeline(
     # ----------------------
     # Helper: safe feather/csv save
     # ----------------------
-    def safe_save(df, path):
-        if df is None:
-            return False
-        if os.path.exists(path) and not overwrite:
-            print(f"↪️  Reusing existing file: {os.path.basename(path)}")
-            return False
-        df = df.reset_index(drop=True)
-        df.columns = df.columns.astype(str)
-        df.to_feather(path)
-        print(f"💾 Saved: {os.path.basename(path)}")
-        return True
+    def safe_save(df, path, save):
+        if save:
+            if df is None:
+                return False
+            if os.path.exists(path) and not overwrite:
+                print(f"↪️  Reusing existing file: {os.path.basename(path)}")
+                return False
+            df = df.reset_index(drop=True)
+            df.columns = df.columns.astype(str)
+            df.to_feather(path)
+            print(f"💾 Saved: {os.path.basename(path)}")
+            return True
 
-    def safe_save_table(df, base_path):
-        """
-        Save a DataFrame safely to Feather and CSV, ensuring Feather-compatible types.
-        Converts all object columns to strings to avoid ArrowTypeError.
-        """
-        import os
-        if df is None:
-            return False
+    def safe_save_table(df, base_path, save):
+        if save:
+            """
+            Save a DataFrame safely to Feather and CSV, ensuring Feather-compatible types.
+            Converts all object columns to strings to avoid ArrowTypeError.
+            """
+            import os
+            if df is None:
+                return False
 
-        feather_path = base_path + ".feather"
-        csv_path     = base_path + ".csv"
+            feather_path = base_path + ".feather"
+            csv_path     = base_path + ".csv"
 
-        # Reset index and ensure column names are strings
-        df = df.reset_index(drop=True)
-        df.columns = df.columns.astype(str)
+            # Reset index and ensure column names are strings
+            df = df.reset_index(drop=True)
+            df.columns = df.columns.astype(str)
 
-        # Convert any object columns to string to prevent ArrowTypeError
-        for col in df.select_dtypes(include=['object']).columns:
-            df[col] = df[col].astype(str)
+            # Convert any object columns to string to prevent ArrowTypeError
+            for col in df.select_dtypes(include=['object']).columns:
+                df[col] = df[col].astype(str)
 
-        # Save Feather
-        if not os.path.exists(feather_path) or overwrite:
-            df.to_feather(feather_path)
-            print(f"💾 Saved: {os.path.basename(feather_path)}")
-        else:
-            print(f"↪️  Reusing existing file: {os.path.basename(feather_path)}")
+            # Save Feather
+            if not os.path.exists(feather_path) or overwrite:
+                df.to_feather(feather_path)
+                print(f"💾 Saved: {os.path.basename(feather_path)}")
+            else:
+                print(f"↪️  Reusing existing file: {os.path.basename(feather_path)}")
 
-        # Save CSV
-        if not os.path.exists(csv_path) or overwrite:
-            df.to_csv(csv_path, index=False)
-            print(f"💾 Saved: {os.path.basename(csv_path)}")
-        else:
-            print(f"↪️  Reusing existing file: {os.path.basename(csv_path)}")
+            # Save CSV
+            if not os.path.exists(csv_path) or overwrite:
+                df.to_csv(csv_path, index=False)
+                print(f"💾 Saved: {os.path.basename(csv_path)}")
+            else:
+                print(f"↪️  Reusing existing file: {os.path.basename(csv_path)}")
 
-        return True
+            return True
 
 
-    def safe_save_txt(text, path):
-        if text is None:
-            return False
-        if os.path.exists(path) and not overwrite:
-            print(f"↪️  Reusing existing file: {os.path.basename(path)}")
-            return False
-        with open(path, "w") as f:
-            f.write(text)
-        print(f"💾 Saved: {os.path.basename(path)}")
-        return True
+    def safe_save_txt(text, path, save):
+        if save:
+            if text is None:
+                return False
+            if os.path.exists(path) and not overwrite:
+                print(f"↪️  Reusing existing file: {os.path.basename(path)}")
+                return False
+            with open(path, "w") as f:
+                f.write(text)
+            print(f"💾 Saved: {os.path.basename(path)}")
+            return True
 
     
-    def safe_save_fig(fig, path_base):
-        """
-        Saves figure as PNG, PDF, and SVG automatically.
-        `path_base` should NOT include extension.
-        Example: safe_save_fig(fig, "my_figure")
-        """
+    def safe_save_fig(fig, path_base, save):
+        if save:
+            """
+            Saves figure as PNG, PDF, and SVG automatically.
+            `path_base` should NOT include extension.
+            Example: safe_save_fig(fig, "my_figure")
+            """
 
-        if fig is None:
-            return False
+            if fig is None:
+                return False
 
-        # --- Illustrator-friendly font settings ---
-        mpl.rcParams['pdf.fonttype'] = 42      # Keep text editable in PDF
-        mpl.rcParams['ps.fonttype'] = 42
-        mpl.rcParams['svg.fonttype'] = 'none'  # Keep text editable in SVG
+            # --- Illustrator-friendly font settings ---
+            mpl.rcParams['pdf.fonttype'] = 42      # Keep text editable in PDF
+            mpl.rcParams['ps.fonttype'] = 42
+            mpl.rcParams['svg.fonttype'] = 'none'  # Keep text editable in SVG
 
-        saved_any = False
+            saved_any = False
 
-        formats = {
-            "png": {"dpi": 600},
-            "pdf": {},
-            "svg": {}
-        }
+            formats = {
+                "png": {"dpi": 600},
+                "pdf": {},
+                "svg": {}
+            }
 
-        for ext, kwargs in formats.items():
-            full_path = f"{path_base}.{ext}"
+            for ext, kwargs in formats.items():
+                full_path = f"{path_base}.{ext}"
 
-            if os.path.exists(full_path) and not overwrite:
-                print(f"↪️  Reusing existing figure: {os.path.basename(full_path)}")
-                continue
+                if os.path.exists(full_path) and not overwrite:
+                    print(f"↪️  Reusing existing figure: {os.path.basename(full_path)}")
+                    continue
 
-            fig.savefig(
-                full_path,
-                bbox_inches='tight',
-                transparent= True,
-                facecolor= None,
-                edgecolor="none",
-                **kwargs
-            )
+                fig.savefig(
+                    full_path,
+                    bbox_inches='tight',
+                    transparent= True,
+                    facecolor= None,
+                    edgecolor="none",
+                    **kwargs
+                )
 
-            print(f"🖼️  Saved: {os.path.basename(full_path)}")
-            saved_any = True
+                print(f"🖼️  Saved: {os.path.basename(full_path)}")
+                saved_any = True
 
-        return saved_any
+            return saved_any
 
 
     # ----------------------
@@ -5625,7 +5630,7 @@ def run_perievent_pipeline(
         f"{processed_phase}_{eventname}_file_level_summary"
     )
 
-    safe_save_table(file_summary_df, file_summary_base)
+    safe_save_table(file_summary_df, file_summary_base, save)
         
     # -------------------
     # Tier 1: per-rat processing
@@ -5726,17 +5731,17 @@ def run_perievent_pipeline(
         # Save per-rat files
         rat_base = os.path.join(save_dir, f"{processed_phase}_{rat}_{eventname}")
         rat_base_fig = os.path.join(fig_output_path, f"{processed_phase}_{rat}_{eventname}")
-        safe_save_table(combined_baselined, rat_base + "_epocs_bslnd")
-        safe_save_table(combined_stats, rat_base + "_stats")
-        safe_save_table(per_epoc_stats_df, rat_base + "_per_epoc_stats")
+        safe_save_table(combined_baselined, rat_base + "_epocs_bslnd", save)
+        safe_save_table(combined_stats, rat_base + "_stats", save)
+        safe_save_table(per_epoc_stats_df, rat_base + "_per_epoc_stats", save)
        
 
         # per-rat figures can optionally be saved here
         if _fig_onset is not None:      
-            safe_save_fig(_fig_onset, rat_base_fig + "_onset_slope")     # temp to assure this is working
+            safe_save_fig(_fig_onset, rat_base_fig + "_onset_slope", save)     # temp to assure this is working
             
         if fig_trials is not None:
-            safe_save_fig(fig_trials, rat_base_fig + "_individual_trials")
+            safe_save_fig(fig_trials, rat_base_fig + "_individual_trials", save)
             
         
     # -----------------------
@@ -5768,8 +5773,8 @@ def run_perievent_pipeline(
     )
     within_animal_epocs_sem.insert(0, "time", ts)
 
-    safe_save_table(within_animal_epocs_mean, within_base + "_means")
-    safe_save_table(within_animal_epocs_sem, within_base + "_sem")
+    safe_save_table(within_animal_epocs_mean, within_base + "_means", save)
+    safe_save_table(within_animal_epocs_sem, within_base + "_sem", save)
 
     #########
     import matplotlib.pyplot as plt
@@ -5929,14 +5934,14 @@ def run_perievent_pipeline(
     base_all_trial = os.path.join(save_dir, f"{processed_phase}_{eventname}_across_trial")   # remove rat_str to shorten file name
     base_all_trial_fig = os.path.join(fig_output_path, f"{processed_phase}_{eventname}_across_trial")
 
-    safe_save_table(combined_baselined_all, base_all_trial + "_epocs_bslnd")
-    safe_save_table(combined_stats_all, base_all_trial + "_stats")
-    safe_save_table(per_epoc_stats_all, base_all_trial + "_PER_EPOC_summary_stats")
-    safe_save_table(combined_events_info_trial, base_all_trial + "_summary")
-    safe_save_txt(combined_events_info_trial.to_string(index=False), base_all_trial + "_summary.txt")
+    safe_save_table(combined_baselined_all, base_all_trial + "_epocs_bslnd", save)
+    safe_save_table(combined_stats_all, base_all_trial + "_stats", save)
+    safe_save_table(per_epoc_stats_all, base_all_trial + "_PER_EPOC_summary_stats", save)
+    safe_save_table(combined_events_info_trial, base_all_trial + "_summary", save)
+    safe_save_txt(combined_events_info_trial.to_string(index=False), base_all_trial + "_summary.txt", save)
     
-    safe_save_fig(fig_trial_all, base_all_trial_fig + "_across_trials")
-    safe_save_fig(fig_within_all, base_all_trial_fig + "_within_rats")
+    safe_save_fig(fig_trial_all, base_all_trial_fig + "_across_trials", save)
+    safe_save_fig(fig_within_all, base_all_trial_fig + "_within_rats", save)
 
     from matplotlib import gridspec
     from scipy.ndimage import gaussian_filter1d
@@ -6186,7 +6191,7 @@ def run_perievent_pipeline(
     #heatmap_base = os.path.join(fig_output_path, f"{processed_phase}_{rat_str}_{eventname}_all_trials_heatmap")
     
     heatmap_base = os.path.join(fig_output_path, f"{processed_phase}_{eventname}_all_trials_heatmap")  # remove rat_str to shorten file name
-    safe_save_fig(fig_all_trials, heatmap_base)
+    safe_save_fig(fig_all_trials, heatmap_base, save)
     
     
     # ------------------------------------------------------------
@@ -6339,7 +6344,7 @@ def run_perievent_pipeline(
     )
     
     
-    safe_save_fig(fig_heatmap_within_rat, heatmap_within_rat_base)
+    safe_save_fig(fig_heatmap_within_rat, heatmap_within_rat_base, save)
     
     
     # -------------------
@@ -6589,22 +6594,22 @@ def run_perievent_pipeline(
     )
 
 
-    safe_save_table(across_animal_epocs, base_all_animal + "_epocs_bslnd")
-    safe_save_table(across_animal_stats, base_all_animal + "_stats")
-    safe_save_table(per_animal_stats_df, base_all_animal + "_PER_ANIMAL_summary_stats")
-    safe_save_table(combined_events_info_animal, base_all_animal + "_summary")
+    safe_save_table(across_animal_epocs, base_all_animal + "_epocs_bslnd", save)
+    safe_save_table(across_animal_stats, base_all_animal + "_stats", save)
+    safe_save_table(per_animal_stats_df, base_all_animal + "_PER_ANIMAL_summary_stats", save)
+    safe_save_table(combined_events_info_animal, base_all_animal + "_summary", save)
     safe_save_txt(
         combined_events_info_animal.to_string(index=False),
-        base_all_animal + "_summary.txt"
+        base_all_animal + "_summary.txt", save
     )
     
     safe_save_fig(
         fig_across_all,
-        base_all_animal_fig
+        base_all_animal_fig, save
     )
     
     safe_save_fig(fig_across_animal_onset,
-                  base_all_animal_fig + "_onset_slope")
+                  base_all_animal_fig + "_onset_slope", save)
 
 
     print("Across-trial SEM (approach):", approach_sem_all)
@@ -6897,7 +6902,7 @@ def run_perievent_pipeline(
         
         safe_save_fig(
             fig_stack,
-            os.path.join(fig_output_path, f"{processed_phase}_{eventname}_stacked") # remove rat str to shorten file name
+            os.path.join(fig_output_path, f"{processed_phase}_{eventname}_stacked", save) # remove rat str to shorten file name
         )
         
         plt.show()        
