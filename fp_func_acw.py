@@ -2867,8 +2867,301 @@ def streams_trim_events_tdt(isos_405_filt_downsamp, GCaMP_465_filt_downsamp,
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 
 # updated documentation 07.31.26
+# updated 11.15.26 to add customizable artifact window 
 
 def visualize_and_correct_artifacts(
+    epoc_ts_and_indices,
+    new_fs,
+    ts,
+    GCaMP_465,
+    isos_405,
+    correct_stream='both',              # Options: 'isos', 'gcamp', 'both', or 'none'
+    segments_to_correct=None,           # list of segment indices to correct (1-based)
+    baseline_window_sec=2.0,
+    artifact_duration_sec=4.0,          # customizable artifact duration
+    artifact_window_sec=None,           # (start, end) in s relative to timestamp, e.g. (2, 4)
+    buffer_sec=0.15,
+    interpolation_ranges_sec=None,      # list of tuples, e.g., [(-0.2, 0.2), (3.8, 4.2)]
+    interpolation_position='both',     # 'onset', 'offset', or 'both'
+    correction_mode='both'       # options: 'offset', 'interpolate', 'both', 'none'
+ 
+):
+    """
+    Correct artifacts using median-based, clamped subtraction to prevent post-correction overshoot.
+    Supports optional interpolation at onset, offset, or both.
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from scipy.stats import sem
+
+    # Early exit if epoc_ts_and_indices is empty
+    if epoc_ts_and_indices is None or epoc_ts_and_indices.empty:
+        print("epoc_ts_and_indices is empty → skipping artifact correction.")
+        return GCaMP_465.copy(), isos_405.copy()
+
+    # use assert statements to check inputs
+    assert correct_stream in ['isos', 'gcamp', 'both', 'none'], "Invalid option for correct_stream"
+    assert interpolation_position in ['onset', 'offset', 'both'], "Invalid option for interpolation_position"
+    assert correction_mode in ['offset', 'interpolate', 'both', 'none'], "correction_mode must be 'offset', 'interpolate', 'both', or 'none'"
+
+    # create the dataframe of events that include cue light illumination (potential light artifacts)
+    drug_infusions = epoc_ts_and_indices[
+        epoc_ts_and_indices['event'].str.contains('infusion|cue light|houselight', case=False) # add houselight?
+    ]
+    
+    if drug_infusions.empty:
+        print("No 'drug infusion' events found.")
+        return GCaMP_465.copy(), isos_405.copy()
+
+    # convert windows to number of samples from seconds
+    baseline_pts = int(new_fs * baseline_window_sec)
+    artifact_pts = int(new_fs * artifact_duration_sec)
+    buffer_pts = int(new_fs * buffer_sec)
+    
+    if artifact_window_sec is None:
+        artifact_window_sec = (0, artifact_duration_sec)
+    win_start_sec, win_end_sec = artifact_window_sec
+    assert win_end_sec > win_start_sec, "artifact_window_sec must be (start, end) with end > start"
+    win_start_pts = int(new_fs * win_start_sec)
+    win_end_pts = int(new_fs * win_end_sec)
+    
+
+    overlay_pre = int(new_fs * 4)
+    overlay_post = int(new_fs * 8)
+    overlay_total = overlay_pre + overlay_post
+    overlay_time = np.linspace(-4, 8, overlay_total)
+
+    gcamp_segments = []
+    isos_segments = []
+    GCaMP_corrected = GCaMP_465.copy()
+    isos_corrected = isos_405.copy()
+
+    # map(int, iterable) applies a function to each element of the iterable, in this case converting each epoc_indices element to an integer
+    # then wrap in a list 
+    onset_indices = list(map(int, drug_infusions['epoc_indices']))
+    print(f"Detected {len(onset_indices)} artifact segments.")
+
+    # if a subset of segments isn't specified, correct all of them
+    if segments_to_correct is None:
+        segments_to_correct = list(range(1, len(onset_indices) + 1))
+    else:
+        print(f"Correcting only segments: {segments_to_correct}")
+
+    # start looping through each event
+    for seg_idx, onset in enumerate(onset_indices, start=1):
+        seg_start = onset - overlay_pre
+        seg_end = onset + overlay_post
+
+        if seg_start < 0 or seg_end >= len(ts):
+            print(f"Skipping overlay segment #{seg_idx}: out of bounds.")
+            continue
+
+        # create lists of numpy arrays, each one corresponding to infusion / cue light events
+        gcamp_segments.append(GCaMP_465[seg_start:seg_end])
+        isos_segments.append(isos_405[seg_start:seg_end])
+
+        if correct_stream == 'none' or seg_idx not in segments_to_correct:
+            continue
+
+        # --- Baseline and artifact windows ---
+        # use the various windows to get the index start and stop for baseline, artifact
+        baseline_end = onset + win_start_pts - buffer_pts
+        baseline_start = max(baseline_end - baseline_pts, 0)
+
+        artifact_core_start = onset + win_start_pts
+        artifact_core_end = min(onset + win_end_pts, len(ts))
+
+        # ======================================================
+        # 1. MEDIAN-BASED OFFSET SUBTRACTION  (if enabled)
+        # ======================================================
+        if correction_mode in ['offset', 'both']:
+
+            # offset is the difference between the pre-event baseline and the event window
+            # median, rather than mean, less sensitive to noise / spikes in amplitude
+            # Median-based offset
+            baseline_median_gcamp = np.median(GCaMP_465[baseline_start:baseline_end])
+            artifact_median_gcamp = np.median(GCaMP_465[artifact_core_start:artifact_core_end])
+            # offset should not be negative - artifacts are appearing as almost square-pulse increases in amplitude
+            offset_gcamp = max(0, artifact_median_gcamp - baseline_median_gcamp)
+
+            baseline_median_isos = np.median(isos_405[baseline_start:baseline_end])
+            artifact_median_isos = np.median(isos_405[artifact_core_start:artifact_core_end])
+            offset_isos = max(0, artifact_median_isos - baseline_median_isos)
+
+            # Apply offset across artifact region
+            if correct_stream in ['gcamp', 'both']:
+                GCaMP_corrected[artifact_core_start:artifact_core_end] -= offset_gcamp
+            if correct_stream in ['isos', 'both']:
+                isos_corrected[artifact_core_start:artifact_core_end] -= offset_isos
+
+
+        # ======================================================
+        # 2. OPTIONAL INTERPOLATION  (if enabled)
+        # ======================================================
+        if correction_mode in ['interpolate', 'both'] and interpolation_ranges_sec:
+            
+            win_mid_sec = (win_start_sec + win_end_sec) / 2
+
+            # loop through the list of tuples
+            for start_sec, end_sec in interpolation_ranges_sec:
+                interp_start = int(onset + start_sec * new_fs)
+                interp_end   = int(onset + end_sec * new_fs)
+
+                range_mid_sec = (start_sec + end_sec) / 2
+                is_start_edge = range_mid_sec < win_mid_sec
+                is_end_edge = not is_start_edge
+
+                # ---- Onset interpolation (negative range) ----
+                # use np.linspace to create the interpolations
+                if interpolation_position in ['onset', 'both'] and is_start_edge:
+                    if correct_stream in ['gcamp', 'both']:
+                        y0 = GCaMP_465[interp_start]
+                        y1 = GCaMP_corrected[interp_end] if correction_mode != 'interpolate' else GCaMP_465[interp_end]
+                        GCaMP_corrected[interp_start:interp_end] = np.linspace(y0, y1, interp_end - interp_start)
+
+                    if correct_stream in ['isos', 'both']:
+                        y0 = isos_405[interp_start]
+                        y1 = isos_corrected[interp_end] if correction_mode != 'interpolate' else isos_405[interp_end]
+                        isos_corrected[interp_start:interp_end] = np.linspace(y0, y1, interp_end - interp_start)
+
+                # ---- Offset interpolation (positive range) ----
+                if interpolation_position in ['offset', 'both'] and is_end_edge:
+                    if correct_stream in ['gcamp', 'both']:
+                        y0 = GCaMP_corrected[interp_start]
+                        y1 = GCaMP_465[interp_end]
+                        GCaMP_corrected[interp_start:interp_end] = np.linspace(y0, y1, interp_end - interp_start)
+
+                    if correct_stream in ['isos', 'both']:
+                        y0 = isos_corrected[interp_start]
+                        y1 = isos_405[interp_end]
+                        isos_corrected[interp_start:interp_end] = np.linspace(y0, y1, interp_end - interp_start)
+
+    
+    # ---------------------------------------------------------------------
+    # UPDATED legend-smart plotting function (multi-column legend)
+    # ---------------------------------------------------------------------
+    def plot_segments_with_legend(segments, overlay_time, colors, title, artifact_duration_sec):
+
+        if not segments:
+            return
+
+        # use np.vstack to collect the event segment arrays into a matrix, where each row is one event
+        stack = np.vstack(segments)
+        # mean and sem across rows
+        mean_seg = np.mean(stack, axis=0)
+        sem_seg = sem(stack, axis=0)
+
+        plt.figure(figsize=(12, 6))
+        lines = []
+        labels = []
+
+        for i, seg in enumerate(segments):
+            # 'line,' with the comma is a shorthand that returns item [0] of the list produced by plt.plot
+            # [i % len(colors)] involves the modulo operator - it is a "remainder after division", meaning colors can repeat if there were fewer colors in the list than segments. 
+            line, = plt.plot(overlay_time, seg, color=colors[i % len(colors)], alpha=0.4)
+            lines.append(line)
+            labels.append(f"Segment {i+1}")
+
+        # Mean line
+        mean_line, = plt.plot(overlay_time, mean_seg, color=[1, 1, 0], linewidth=3)
+        lines.append(mean_line)
+        labels.append("Mean")
+
+        plt.fill_between(overlay_time, mean_seg - sem_seg, mean_seg + sem_seg,
+                         color=[0.7, 0.7, 0.7], alpha=0.3)
+
+        plt.axvspan(win_start_sec, win_end_sec, color=[1, 0, 1], alpha=0.1)
+
+        plt.title(title)
+        plt.xlabel("Time (s) rel. to artifact onset")
+        plt.ylabel("Signal amplitude")
+
+        # ------- MULTI-COLUMN LEGEND BELOW PLOT -------
+        # given number of events in some recordings, this is necessary to prevent a massive vertical legend. 
+        max_labels_per_col = 10
+        n_labels = len(labels)
+        ncols = math.ceil(n_labels / max_labels_per_col)
+
+        # Create figure and axis first
+        # assign names to current figure and axes (plt.get current fig, axes)
+        fig = plt.gcf()
+        ax = plt.gca()
+
+        # Make space for the legend without shrinking the plot too much
+        fig.subplots_adjust(bottom=0.22)  # increase if legend is large
+
+        legend = fig.legend(
+            lines,
+            labels,
+            loc='lower center',
+            bbox_to_anchor=(0.5, -0.4),   # centered horizontally
+            ncol=ncols,
+            columnspacing=1.0,
+            handletextpad=0.5,
+        )
+
+        plt.tight_layout()
+        plt.show()
+
+    # --------------------------------------------------------------------
+    # this essentially interpolates between the starting and ending colors with evenly spaced steps
+    '''
+    def gradient_colors(start_rgb, end_rgb, n):
+        colors = []
+        for i in range(n):
+            factor = i / max(1, n - 1)
+            color = []
+            for j in range(3):
+                value = start_rgb[j] + (end_rgb[j] - start_rgb[j]) * factor
+                color.append(value)
+            colors.append(color)
+        return colors
+    '''
+    # a more compact version
+    def gradient_colors(start_rgb, end_rgb, n):
+        return [
+            [start_rgb[j] + (end_rgb[j] - start_rgb[j]) * (i / max(1, n - 1)) for j in range(3)]
+            for i in range(n)
+        ]
+
+    gcamp_colors = gradient_colors([0, 0, 1], [0, 1, 0], len(gcamp_segments))
+    isos_colors = gradient_colors([1, 0, 0], [1, 0, 1], len(isos_segments))
+
+    # --- Plot Original Segments ---
+    plot_segments_with_legend(gcamp_segments, overlay_time, gcamp_colors, "GCaMP 465 - Original Segments", artifact_duration_sec)
+    plot_segments_with_legend(isos_segments, overlay_time, isos_colors, "Isosbestic 405 - Original Segments", artifact_duration_sec)
+
+
+    # --- Plot corrected segments (selected only) ---
+    corr_gcamp_segments = []
+    corr_isos_segments = []
+    for seg_idx, onset in enumerate(onset_indices, start=1):
+        if seg_idx not in segments_to_correct:
+            continue
+        seg_start = onset - overlay_pre
+        seg_end = onset + overlay_post
+        if seg_start >= 0 and seg_end < len(ts):
+            corr_gcamp_segments.append(GCaMP_corrected[seg_start:seg_end])
+            corr_isos_segments.append(isos_corrected[seg_start:seg_end])
+
+    # Plot corrected segments if any
+    n_corr = len(corr_gcamp_segments)
+    if n_corr > 0:
+        if correct_stream in ['gcamp', 'both']:
+            plot_segments_with_legend(corr_gcamp_segments, overlay_time, gcamp_colors[:n_corr],
+                                      "GCaMP 465 - Corrected Segments (Selected)", artifact_duration_sec)
+        if correct_stream in ['isos', 'both']:
+            plot_segments_with_legend(corr_isos_segments, overlay_time, isos_colors[:n_corr],
+                                      "Isosbestic 405 - Corrected Segments (Selected)", artifact_duration_sec)
+
+    return GCaMP_corrected, isos_corrected
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+
+# updated documentation 07.31.26
+
+def visualize_and_correct_artifacts_old(
     epoc_ts_and_indices,
     new_fs,
     ts,
@@ -3146,6 +3439,8 @@ def visualize_and_correct_artifacts(
 
 # motion correction using a linear fit between isosbestic and GCaMP streams ------------------------------------------------------------------------------------------------------------
 # documentation updated 07.31.26
+# added fit_window_sec to improve fit on recordings with signal drops, which overweighed the correction
+# can instead selet only a slice of the recording to avoid large square-pulse signal drops when you compute the fit, so it doesn't overcorrect when isos is subtracted in perievent analysis
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -3162,6 +3457,7 @@ def motcorr_unified(
     r2_threshold=0.05,
     window_sec=3,
     fs=None,
+    fit_window_sec=None,  # (start, end) in s, same time base as ts, e.g. (600, 1800) for 10-30 min
     plot=True
 ):
     """
@@ -3175,6 +3471,30 @@ def motcorr_unified(
     # Infer sampling rate if not supplied
     if fs is None:
         fs = 1 / np.median(np.diff(ts))
+        
+        
+    # Select the portion(s) of the data used to FIT the regression
+    if fit_window_sec is None:
+        fit_mask = np.ones(len(ts), dtype=bool)
+        fit_windows = None
+    else:
+        # accept a single (start, end) tuple or a list of them
+        if len(fit_window_sec) == 2 and np.isscalar(fit_window_sec[0]):
+            fit_windows = [tuple(fit_window_sec)]
+        else:
+            fit_windows = [tuple(w) for w in fit_window_sec]
+
+        fit_mask = np.zeros(len(ts), dtype=bool)
+        for fit_start, fit_end in fit_windows:
+            assert fit_end > fit_start, f"window {(fit_start, fit_end)} must have end > start"
+            fit_mask |= (ts >= fit_start) & (ts <= fit_end)
+
+        if fit_mask.sum() < 2:
+            raise ValueError(f"fit_window_sec {fit_window_sec} contains fewer than 2 samples")
+    isos_fit = isos[fit_mask]
+    gcamp_fit = gcamp[fit_mask]
+    
+    
 
     # ================================
     # METHOD 1: linregress
@@ -3184,7 +3504,7 @@ def motcorr_unified(
     # the estiamted motion should not be subtracted because it will actually add artifact
     
     if method == "linregress":
-        slope, intercept, r_value, _, _ = linregress(isos, gcamp)
+        slope, intercept, r_value, _, _ = linregress(isos_fit, gcamp_fit)
         r2 = r_value**2
 
         if clamp_negative and slope < 0:
@@ -3203,14 +3523,14 @@ def motcorr_unified(
     # this is a method based off Charles Zhou, Adam Gordon-Fennell and others at UW
     
     elif method == "polyfit":
-        p = np.polyfit(isos, gcamp, 1)
+        p = np.polyfit(isos_fit, gcamp_fit, 1)
         slope = p[0]
         intercept = p[1]
 
         # compute R²
-        gcamp_hat = slope * isos + intercept
-        ss_res = np.sum((gcamp - gcamp_hat)**2)
-        ss_tot = np.sum((gcamp - np.mean(gcamp))**2)
+        gcamp_hat = slope * isos_fit + intercept
+        ss_res = np.sum((gcamp_fit - gcamp_hat)**2)
+        ss_tot = np.sum((gcamp_fit - np.mean(gcamp_fit))**2)
         r2 = 1 - ss_res/ss_tot
 
         if clamp_negative and slope < 0:
@@ -3241,11 +3561,14 @@ def motcorr_unified(
         # scatter plot (for regression methods)
         if method in ["linregress", "polyfit"]:
             fig1 = plt.figure(figsize=(6,6))
-            plt.scatter(isos[::5], gcamp[::5], alpha=0.3, marker='.')
+            plt.scatter(isos[::5], gcamp[::5], alpha=0.1, marker='.', color='gray', label='all data')
+            plt.scatter(isos_fit[::5], gcamp_fit[::5], alpha=0.3, marker='.', label='fit window')
             x = np.linspace(np.min(isos), np.max(isos), 200)
-            plt.plot(x, slope * x + intercept, color='red')
+            plt.plot(x, slope * x + intercept, color='red', label='fit')
             plt.title(f"{method}: slope={slope:.4f}, R²={r2:.4f}")
+            plt.legend()
             figs.append(fig1)
+
 
         # time plot
         '''
@@ -3328,6 +3651,10 @@ def motcorr_unified(
 
 
         # Shared formatting
+        if fit_windows is not None:
+            for i, (w_start, w_end) in enumerate(fit_windows):
+                ax1.axvspan(w_start, w_end, color='cyan', alpha=0.1,
+                            label='fit window' if i == 0 else None)
         ax1.set_xlim(tzoom)
         ax1.set_xlabel("Time (s)")
         ax1.set_title(f"Motion Correction ({method})")
