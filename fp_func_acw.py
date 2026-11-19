@@ -5670,7 +5670,9 @@ def run_perievent_pipeline(
     paperfig_path = None,
     master_figsize = (2,2),
     plot_onset_detection=False,
-    save = False
+    save = False,
+    lowpass_hz = None,        # cutoff in Hz; None = no filtering    ##### testing #####
+    lowpass_order = 2         # Butterworth order ##### testing #####
 ):
     import os
     import pandas as pd
@@ -6004,7 +6006,9 @@ def run_perievent_pipeline(
             plot_group_comparison=plot_group_comparison,
             plot_baseline_significance=plot_baseline_significance,
             paperfigs = paperfigs,
-            master_figsize = master_figsize
+            master_figsize = master_figsize,
+            lowpass_hz = lowpass_hz,        # cutoff in Hz; None = no filtering    ##### testing #####
+            lowpass_order = lowpass_order         # Butterworth order ##### testing #####
         )
 
             
@@ -6197,7 +6201,9 @@ def run_perievent_pipeline(
         plot_group_comparison=plot_group_comparison,
         plot_baseline_significance=plot_baseline_significance,
         paperfigs = paperfigs,
-        master_figsize = master_figsize
+        master_figsize = master_figsize,
+        lowpass_hz = lowpass_hz,        # cutoff in Hz; None = no filtering    ##### testing #####
+        lowpass_order = lowpass_order         # Butterworth order ##### testing #####
 
     )
 
@@ -7333,7 +7339,9 @@ def perievent_analysis(
         plot_group_comparison=False,
         plot_baseline_significance=False,
         paperfigs = False,
-        master_figsize = (8, 8)
+        master_figsize = (8, 8),
+        lowpass_hz = None,        # cutoff in Hz; None = no filtering    ##### testing #####
+        lowpass_order = 2         # Butterworth order ##### testing #####
 ):
     """
     Loads and concatenates GCaMP_465 epocs feather files, computes statistics,
@@ -7383,6 +7391,44 @@ def perievent_analysis(
         ax.yaxis.set_major_locator(MultipleLocator(1))
         ax.minorticks_off()
 
+        
+        
+     ##### testing #####    
+        
+    def lowpass_epochs(df, cutoff_hz, fs, order=2):
+        """
+        Zero-phase Butterworth low-pass (butter + filtfilt) applied to each
+        column (event) of df. NaN padding is preserved: each contiguous run of
+        finite samples is filtered separately, and runs too short for filtfilt
+        are set to NaN.
+        """
+        nyq = fs / 2.0
+        if not (0 < cutoff_hz < nyq):
+            raise ValueError(f"lowpass_hz must be between 0 and Nyquist ({nyq} Hz); got {cutoff_hz}")
+
+        b, a = butter(order, cutoff_hz, btype='low', fs=fs)
+        # filtfilt requires len(x) > padlen, where the default padlen = 3 * max(len(a), len(b))
+        min_len = 3 * max(len(a), len(b)) + 1
+
+        out = df.copy()
+        for col in df.columns:
+            y = df[col].to_numpy(dtype=float)
+            filt = np.full_like(y, np.nan)
+            finite = np.isfinite(y)
+
+            # find contiguous runs of finite values
+            edges = np.diff(np.concatenate(([0], finite.astype(int), [0])))
+            starts = np.where(edges == 1)[0]
+            ends = np.where(edges == -1)[0]
+
+            for s, e in zip(starts, ends):
+                if (e - s) >= min_len:
+                    filt[s:e] = filtfilt(b, a, y[s:e])
+                # runs shorter than min_len stay NaN
+            out[col] = filt
+        return out
+    
+    
     # ---------------------
     # Gather files
     # ---------------------
@@ -7444,6 +7490,13 @@ def perievent_analysis(
         if df.shape[1] == 0:
             continue
 
+            
+        ##### testing #####
+        
+        if lowpass_hz is not None:
+            df = lowpass_epochs(df, lowpass_hz, new_fs, order=lowpass_order)
+            
+            
         # pathlib .stem extracts the file name, stripping the extension.
         # pathlib treats file paths as objects with associated methods
         fname = Path(f).stem
