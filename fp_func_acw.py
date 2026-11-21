@@ -2899,8 +2899,9 @@ def visualize_and_correct_artifacts(
         print("epoc_ts_and_indices is empty → skipping artifact correction.")
         return GCaMP_465.copy(), isos_405.copy()
 
+   
     # use assert statements to check inputs
-    assert correct_stream in ['isos', 'gcamp', 'both', 'none'], "Invalid option for correct_stream"
+    assert correct_stream in ['isos', 'isos_405_nocuearts', 'gcamp', 'GCaMP_465_nocuearts', 'both', 'none'], "Invalid option for correct_stream"
     assert interpolation_position in ['onset', 'offset', 'both'], "Invalid option for interpolation_position"
     assert correction_mode in ['offset', 'interpolate', 'both', 'none'], "correction_mode must be 'offset', 'interpolate', 'both', or 'none'"
 
@@ -2989,9 +2990,9 @@ def visualize_and_correct_artifacts(
             offset_isos = max(0, artifact_median_isos - baseline_median_isos)
 
             # Apply offset across artifact region
-            if correct_stream in ['gcamp', 'both']:
+            if correct_stream in ['gcamp', 'both', 'GCaMP_465_nocuearts']:
                 GCaMP_corrected[artifact_core_start:artifact_core_end] -= offset_gcamp
-            if correct_stream in ['isos', 'both']:
+            if correct_stream in ['isos', 'both', 'isos_405_nocuearts']:
                 isos_corrected[artifact_core_start:artifact_core_end] -= offset_isos
 
 
@@ -3014,24 +3015,24 @@ def visualize_and_correct_artifacts(
                 # ---- Onset interpolation (negative range) ----
                 # use np.linspace to create the interpolations
                 if interpolation_position in ['onset', 'both'] and is_start_edge:
-                    if correct_stream in ['gcamp', 'both']:
+                    if correct_stream in ['gcamp', 'both', 'GCaMP_465_nocuearts']:
                         y0 = GCaMP_465[interp_start]
                         y1 = GCaMP_corrected[interp_end] if correction_mode != 'interpolate' else GCaMP_465[interp_end]
                         GCaMP_corrected[interp_start:interp_end] = np.linspace(y0, y1, interp_end - interp_start)
 
-                    if correct_stream in ['isos', 'both']:
+                    if correct_stream in ['isos', 'both', 'isos_405_nocuearts']:
                         y0 = isos_405[interp_start]
                         y1 = isos_corrected[interp_end] if correction_mode != 'interpolate' else isos_405[interp_end]
                         isos_corrected[interp_start:interp_end] = np.linspace(y0, y1, interp_end - interp_start)
 
                 # ---- Offset interpolation (positive range) ----
                 if interpolation_position in ['offset', 'both'] and is_end_edge:
-                    if correct_stream in ['gcamp', 'both']:
+                    if correct_stream in ['gcamp', 'both', 'GCaMP_465_nocuearts']:
                         y0 = GCaMP_corrected[interp_start]
                         y1 = GCaMP_465[interp_end]
                         GCaMP_corrected[interp_start:interp_end] = np.linspace(y0, y1, interp_end - interp_start)
 
-                    if correct_stream in ['isos', 'both']:
+                    if correct_stream in ['isos', 'both', 'isos_405_nocuearts']:
                         y0 = isos_corrected[interp_start]
                         y1 = isos_405[interp_end]
                         isos_corrected[interp_start:interp_end] = np.linspace(y0, y1, interp_end - interp_start)
@@ -3147,10 +3148,10 @@ def visualize_and_correct_artifacts(
     # Plot corrected segments if any
     n_corr = len(corr_gcamp_segments)
     if n_corr > 0:
-        if correct_stream in ['gcamp', 'both']:
+        if correct_stream in ['gcamp', 'both', 'GCaMP_465_nocuearts']:
             plot_segments_with_legend(corr_gcamp_segments, overlay_time, gcamp_colors[:n_corr],
                                       "GCaMP 465 - Corrected Segments (Selected)", artifact_duration_sec)
-        if correct_stream in ['isos', 'both']:
+        if correct_stream in ['isos', 'both', 'isos_405_nocuearts']:
             plot_segments_with_legend(corr_isos_segments, overlay_time, isos_colors[:n_corr],
                                       "Isosbestic 405 - Corrected Segments (Selected)", artifact_duration_sec)
 
@@ -3436,6 +3437,188 @@ def visualize_and_correct_artifacts_old(
 
 
 
+# motion correction using a linear fit between isosbestic and GCaMP streams ------------------------------------------------------------------------------------------------------------
+# update, try a proportional correction
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import butter, sosfiltfilt
+from scipy.ndimage import median_filter
+from scipy.stats import linregress
+
+def motcorr_unified(
+    ts,
+    isos,
+    gcamp,
+    tzoom,
+    method="linregress",      # 'linregress', 'polyfit', or 'proportional'
+    clamp_negative=True,
+    r2_threshold=0.05,
+    window_sec=3,
+    fs=None,
+    fit_window_sec=None,      # regression methods only
+    smooth_sec=60,            # proportional only: window for the slow baselines
+    isos_smooth_hz=None,      # optional lowpass on isos before it is scaled/fitted
+    plot=True
+):
+    """
+    Motion correction:
+    - 'linregress' / 'polyfit': one global line, est_motion = slope*isos + intercept
+    - 'proportional': est_motion = isos * (slow GCaMP baseline / slow isos baseline),
+      i.e. a slowly varying, zero-intercept gain. Cancels artifacts that scale
+      both channels by the same factor.
+    """
+    figs = []
+
+    if fs is None:
+        fs = 1 / np.median(np.diff(ts))
+
+    # Optional lowpass on isos: less noise gets injected into the corrected GCaMP
+    if isos_smooth_hz:
+        sos = butter(2, isos_smooth_hz, btype='low', fs=fs, output='sos')
+        isos_reg = sosfiltfilt(sos, isos)
+    else:
+        isos_reg = isos
+
+    # Fit window (regression methods; also used for the reported R2 in proportional)
+    if fit_window_sec is None:
+        fit_mask = np.ones(len(ts), dtype=bool)
+        fit_windows = None
+    else:
+        if len(fit_window_sec) == 2 and np.isscalar(fit_window_sec[0]):
+            fit_windows = [tuple(fit_window_sec)]
+        else:
+            fit_windows = [tuple(w) for w in fit_window_sec]
+
+        fit_mask = np.zeros(len(ts), dtype=bool)
+        for fit_start, fit_end in fit_windows:
+            assert fit_end > fit_start, f"window {(fit_start, fit_end)} must have end > start"
+            fit_mask |= (ts >= fit_start) & (ts <= fit_end)
+
+        if fit_mask.sum() < 2:
+            raise ValueError(f"fit_window_sec {fit_window_sec} contains fewer than 2 samples")
+
+    isos_fit = isos_reg[fit_mask]
+    gcamp_fit = gcamp[fit_mask]
+
+    # ================================
+    # METHOD 1: linregress
+    # ================================
+    if method == "linregress":
+        slope, intercept, r_value, _, _ = linregress(isos_fit, gcamp_fit)
+        r2 = r_value**2
+
+        if clamp_negative and slope < 0:
+            slope = 0
+            intercept = 0
+            print('negative regression slope, correction not applied')
+
+        if r2 < r2_threshold:
+            est_motion = None
+        else:
+            est_motion = slope * isos_reg + intercept
+
+    # ================================
+    # METHOD 2: polyfit
+    # ================================
+    elif method == "polyfit":
+        p = np.polyfit(isos_fit, gcamp_fit, 1)
+        slope = p[0]
+        intercept = p[1]
+
+        gcamp_hat = slope * isos_fit + intercept
+        ss_res = np.sum((gcamp_fit - gcamp_hat)**2)
+        ss_tot = np.sum((gcamp_fit - np.mean(gcamp_fit))**2)
+        r2 = 1 - ss_res/ss_tot
+
+        if clamp_negative and slope < 0:
+            slope = 0
+            intercept = 0
+
+        if r2 < r2_threshold:
+            est_motion = np.zeros_like(isos)
+        else:
+            est_motion = slope * isos_reg + intercept
+
+    # ================================
+    # METHOD 3: proportional (time-varying, zero-intercept gain)
+    # ================================
+    elif method == "proportional":
+        n = int(smooth_sec * fs) | 1                         # odd window length in samples
+        g_slow = median_filter(gcamp,    size=n, mode='nearest')
+        i_slow = median_filter(isos_reg, size=n, mode='nearest')
+        gain = g_slow / i_slow                               # assumes isos > 0 (raw fluorescence)
+        est_motion = isos_reg * gain
+
+        slope = float(np.nanmedian(gain))                    # summary only; the gain varies in time
+        intercept = 0.0
+        r2 = np.corrcoef(isos_fit, gcamp_fit)[0, 1] ** 2     # reporting only, not used as a gate
+
+    else:
+        raise ValueError("method must be 'linregress', 'polyfit', or 'proportional'")
+
+    # ================================
+    # APPLY CORRECTION
+    # ================================
+    if est_motion is None:
+        gcamp_corrected = gcamp.copy()
+    else:
+        gcamp_corrected = gcamp - est_motion
+
+    # ================================
+    # PLOT
+    # ================================
+    if plot:
+        fig1 = plt.figure(figsize=(6, 6))
+        plt.scatter(isos_reg[::5], gcamp[::5], alpha=0.1, marker='.', color='gray', label='all data')
+        plt.scatter(isos_fit[::5], gcamp_fit[::5], alpha=0.3, marker='.', label='fit window')
+        x = np.linspace(np.min(isos_reg), np.max(isos_reg), 200)
+        plt.plot(x, slope * x + intercept, color='red',
+                 label='fit' if method != "proportional" else 'median gain (through origin)')
+        plt.title(f"{method}: slope={slope:.4f}, R²={r2:.4f}")
+        plt.legend()
+        figs.append(fig1)
+
+        fig2, ax1 = plt.subplots(figsize=(12, 5))
+        ax1.plot(ts, gcamp, color='magenta', label="GCaMP original", zorder=2)
+        if est_motion is not None:
+            ax1.plot(ts, est_motion, color='yellow', label="Estimated motion", zorder=3)
+        else:
+            ax1.text(0.01, 0.95, "Motion correction skipped (low R²)",
+                     transform=ax1.transAxes, color='red', fontsize=10, verticalalignment='top')
+        ax1.set_ylabel("GCaMP signal", color='magenta')
+        ax1.tick_params(axis='y', labelcolor='magenta')
+
+        ax2 = ax1.twinx()
+        ax2.set_zorder(0)
+        ax1.set_zorder(1)
+        ax1.patch.set_visible(False)
+        ax2.plot(ts, isos_reg, color=[0.7, 0.7, 0.7], label="isos (405)", zorder=1)
+        ax2.set_ylabel("isos (405)", color='gray')
+        ax2.tick_params(axis='y', labelcolor='gray')
+
+        if fit_windows is not None:
+            for i, (w_start, w_end) in enumerate(fit_windows):
+                ax1.axvspan(w_start, w_end, color='cyan', alpha=0.1,
+                            label='fit window' if i == 0 else None)
+        ax1.set_xlim(tzoom)
+        ax1.set_xlabel("Time (s)")
+        ax1.set_title(f"Motion Correction ({method})")
+
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
+        figs.append(fig2)
+
+        fig3, ax = plt.subplots(figsize=(12, 5))
+        ax.plot(ts, gcamp_corrected, color=[0.1, 0.7, 0.2], label="GCaMP corrected")
+        ax.set_xlim(tzoom)
+        ax.legend()
+        ax.set_title(f"Motion Correction ({method})")
+        figs.append(fig3)
+
+    return gcamp_corrected, est_motion, slope, intercept, r2, figs
+
 
 # motion correction using a linear fit between isosbestic and GCaMP streams ------------------------------------------------------------------------------------------------------------
 # documentation updated 07.31.26
@@ -3447,7 +3630,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt, fftconvolve
 from scipy.stats import linregress
 
-def motcorr_unified(
+def motcorr_unified_old(
     ts,
     isos,
     gcamp,
