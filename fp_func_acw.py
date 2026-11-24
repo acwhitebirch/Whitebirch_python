@@ -6164,10 +6164,10 @@ def run_perievent_pipeline(
             _fig_within,
             _fig_onset,
             fig_trials,
-            (cue_mean, cue_sem),
+            (post_mean, post_sem),
             (auc_pre_mean, auc_pre_sem),
             (auc_post_mean, auc_post_sem),
-            (approach_mean, approach_sem),
+            (pre_mean, pre_sem),
             (onset_mean, onset_sem), 
             (slope_mean, slope_sem),  
             (time_to_peak_mean, time_to_peak_sem),
@@ -6207,8 +6207,8 @@ def run_perievent_pipeline(
         }
 
         per_rat_stats[rat] = {
-            "cue_stats": (cue_mean, cue_sem),
-            "approach_stats": (approach_mean, approach_sem),
+            "post_stats": (post_mean, post_sem),
+            "pre_stats": (pre_mean, pre_sem),
             "auc_pre_stats": (auc_pre_mean, auc_pre_sem),
             "auc_post_stats": (auc_post_mean, auc_post_sem),
 
@@ -6358,10 +6358,10 @@ def run_perievent_pipeline(
         fig_within_all,
         fig_onset_all,
         fig_trials_all,
-        (cue_mean_all, cue_sem_all),
+        (post_mean_all, post_sem_all),
         (auc_pre_mean_all, auc_pre_sem_all),
         (auc_post_mean_all, auc_post_sem_all),
-        (approach_mean_all, approach_sem_all),
+        (pre_mean_all, pre_sem_all),
         (onset_mean_all, onset_sem_all),
         (slope_mean_all, slope_sem_all),
         (time_to_peak_mean_all, time_to_peak_sem_all),
@@ -6401,12 +6401,12 @@ def run_perievent_pipeline(
         "rats included": rat_str,
         "event count": combined_epocs_all.shape[1],
         "subset": subset,
-        "approach window (s)": str(compute_kwargs["approach_window"]),
-        "mean approach response": f"{approach_mean_all:.3f}",
-        "SEM approach response": f"{approach_sem_all:.3f}",
-        "cue window (s)": str(compute_kwargs["cue_window"]),
-        "mean cue response": f"{cue_mean_all:.3f}",
-        "SEM cue response": f"{cue_sem_all:.3f}",
+        "pre window (s)": str(compute_kwargs["pre_window"]),
+        "mean pre response": f"{pre_mean_all:.3f}",
+        "SEM pre response": f"{pre_sem_all:.3f}",
+        "cue window (s)": str(compute_kwargs["post_window"]),
+        "mean cue response": f"{post_mean_all:.3f}",
+        "SEM cue response": f"{post_sem_all:.3f}",
         "pre-event AUC window (s)": str(compute_kwargs["auc_pre_window"]),
         "mean pre-event AUC": f"{auc_pre_mean_all:.3f}",
         "SEM pre-event AUC": f"{auc_pre_sem_all:.3f}",
@@ -6875,8 +6875,8 @@ def run_perievent_pipeline(
     for rat, stats_dict in per_rat_stats.items():
         per_animal_epoc_stats.append({
             "rat_id": rat,
-            "cue_mean": stats_dict["cue_stats"][0],
-            "approach_mean": stats_dict["approach_stats"][0],
+            "post_mean": stats_dict["post_stats"][0],
+            "pre_mean": stats_dict["pre_stats"][0],
             "auc_pre_mean": stats_dict["auc_pre_stats"][0],
             "auc_post_mean": stats_dict["auc_post_stats"][0],
             "onset_mean": stats_dict["onset_stats"][0],
@@ -6894,17 +6894,17 @@ def run_perievent_pipeline(
     # ---------------------------------
     # Across-animal scalar stats
     # ---------------------------------
-    cue_mean_animal = per_animal_stats_df["cue_mean"].mean()
+    post_mean_animal = per_animal_stats_df["post_mean"].mean()
     if n_animals > 1:
-        cue_sem_animal  = per_animal_stats_df["cue_mean"].std(ddof=1) / np.sqrt(n_animals)
+        post_sem_animal  = per_animal_stats_df["post_mean"].std(ddof=1) / np.sqrt(n_animals)
     else:
-        cue_sem_animal = 0.0
+        post_sem_animal = 0.0
         
-    approach_mean_animal = per_animal_stats_df["approach_mean"].mean()
+    pre_mean_animal = per_animal_stats_df["pre_mean"].mean()
     if n_animals > 1:
-        approach_sem_animal  = per_animal_stats_df["approach_mean"].std(ddof=1) / np.sqrt(n_animals)
+        pre_sem_animal  = per_animal_stats_df["pre_mean"].std(ddof=1) / np.sqrt(n_animals)
     else:
-        approach_sem_animal = 0.0
+        pre_sem_animal = 0.0
         
     auc_pre_mean_animal = per_animal_stats_df["auc_pre_mean"].mean()
     
@@ -7044,13 +7044,13 @@ def run_perievent_pipeline(
         "animal count": n_animals,
         "subset": subset,
 
-        "approach window (s)": str(compute_kwargs["approach_window"]),
-        "mean approach response": f"{approach_mean_animal:.3f}",
-        "SEM approach response": f"{approach_sem_animal:.3f}",
+        "pre window (s)": str(compute_kwargs["pre_window"]),
+        "mean pre response": f"{pre_mean_animal:.3f}",
+        "SEM pre response": f"{pre_sem_animal:.3f}",
 
-        "post window (s)": str(compute_kwargs["cue_window"]),
-        "mean post response": f"{cue_mean_animal:.3f}",
-        "SEM post response": f"{cue_sem_animal:.3f}",
+        "post window (s)": str(compute_kwargs["post_window"]),
+        "mean post response": f"{post_mean_animal:.3f}",
+        "SEM post response": f"{post_sem_animal:.3f}",
 
         "pre-event AUC window (s)": str(compute_kwargs["auc_pre_window"]),
         "mean pre-event AUC": f"{auc_pre_mean_animal:.3f}",
@@ -7128,8 +7128,8 @@ def run_perievent_pipeline(
                   base_all_animal_fig + "_onset_slope", save)
 
 
-    print("Across-trial SEM (approach):", approach_sem_all)
-    print("Across-animal SEM (approach):", approach_sem_animal)
+    print("Across-trial SEM (pre):", pre_sem_all)
+    print("Across-animal SEM (pre):", pre_sem_animal)
 
     print("\n✅ Perievent pipeline complete")
 
@@ -7430,7 +7430,7 @@ def run_perievent_pipeline(
     return {
         # --- Within-rat / per-rat ---
         "per_rat": per_rat_results,
-        "per_rat_stats": per_rat_stats,  # cue/approach/AUC per rat
+        "per_rat_stats": per_rat_stats,  # cue/pre/AUC per rat
         "per_epoc_stats_within_rat": per_epoc_stats_all,
         "within_animal_epocs_mean": within_animal_epocs_mean,
         "within_animal_epocs_sem": within_animal_epocs_sem,
@@ -7452,13 +7452,13 @@ def run_perievent_pipeline(
         "fig_all": fig_all,
 
         # --- Summary stats for convenience ---
-        "cue_stats_across_trial": (cue_mean_all, cue_sem_all),
-        "approach_stats_across_trial": (approach_mean_all, approach_sem_all),
+        "post_stats_across_trial": (post_mean_all, post_sem_all),
+        "pre_stats_across_trial": (pre_mean_all, pre_sem_all),
         "auc_pre_stats_across_trial": (auc_pre_mean_all, auc_pre_sem_all),
         "auc_post_stats_across_trial": (auc_post_mean_all, auc_post_sem_all),
 
-        "cue_stats_across_animal": (cue_mean_animal, cue_sem_animal),
-        "approach_stats_across_animal": (approach_mean_animal, approach_sem_animal),
+        "post_stats_across_animal": (post_mean_animal, post_sem_animal),
+        "pre_stats_across_animal": (pre_mean_animal, pre_sem_animal),
         "auc_pre_stats_across_animal": (auc_pre_mean_animal, auc_pre_sem_animal),
         "auc_post_stats_across_animal": (auc_post_mean_animal, auc_post_sem_animal),
         
@@ -7495,10 +7495,10 @@ def perievent_analysis(
         ts=None,
         trange=None,
         baseline_trange=None,
-        cue_window=None,
+        post_window=None,
         auc_pre_window=None,
         auc_post_window=None,
-        approach_window=None,
+        pre_window=None,
         plot_auc_region=False,
         plot=True,
         per_animal_traces=None,
@@ -7544,10 +7544,10 @@ def perievent_analysis(
         fig_within,
         fig_onset,
         fig_trials,
-        (cue_mean, cue_sem),
+        (post_mean, post_sem),
         (auc_pre_mean, auc_pre_sem),
         (auc_post_mean, auc_post_sem),
-        (approach_mean, approach_sem),
+        (pre_mean, pre_sem),
         (onset_mean, onset_sem),
         (slope_mean, slope_sem),
         (time_to_peak_mean, time_to_peak_sem),
@@ -8250,8 +8250,8 @@ def perievent_analysis(
         sem_val  = stats.sem(wdata.mean(), nan_policy='omit')
         return mean_val, sem_val
 
-    cue_mean, cue_sem = window_stats(cue_window)
-    approach_mean, approach_sem = window_stats(approach_window)
+    post_mean, post_sem = window_stats(post_window)
+    pre_mean, pre_sem = window_stats(pre_window)
 
     # ---------------------
     # AUC
@@ -8306,16 +8306,16 @@ def perievent_analysis(
 
     
     # Map window means
-    cue_vals = per_epoc_window_mean(cue_window)
-    approach_vals = per_epoc_window_mean(approach_window)
+    post_vals = per_epoc_window_mean(post_window)
+    pre_vals = per_epoc_window_mean(pre_window)
     auc_pre_vals = per_epoc_auc(auc_pre_window)
     auc_post_vals = per_epoc_auc(auc_post_window)
 
     # further build the per_epoc dataframe created above containing onset, peak, and slope measures
     # now add the mean and AUC values for identified windows, for each event
     
-    per_epoc_stats_df["cue_mean"] = [cue_vals.get(epoc, np.nan) for epoc in per_epoc_stats_df.index]
-    per_epoc_stats_df["approach_mean"] = [approach_vals.get(epoc, np.nan) for epoc in per_epoc_stats_df.index]
+    per_epoc_stats_df["post_mean"] = [post_vals.get(epoc, np.nan) for epoc in per_epoc_stats_df.index]
+    per_epoc_stats_df["pre_mean"] = [pre_vals.get(epoc, np.nan) for epoc in per_epoc_stats_df.index]
     per_epoc_stats_df["auc_pre"] = [auc_pre_vals.get(epoc, np.nan) for epoc in per_epoc_stats_df.index]
     per_epoc_stats_df["auc_post"] = [auc_post_vals.get(epoc, np.nan) for epoc in per_epoc_stats_df.index]
 
@@ -8357,8 +8357,8 @@ def perievent_analysis(
         # use consistent color maps, line widths, alpha
         mean_color = np.array([36, 106, 72]) / 255         # across-trial mean
         sem_alpha = 0.4
-        cue_color = 'blue'
-        approach_color = 'magenta'
+        post_color = 'blue'
+        pre_color = 'magenta'
         auc_pre_color = 'blue'
         auc_post_color = 'magenta'
         line_width_mean = 2
@@ -8403,11 +8403,11 @@ def perievent_analysis(
         ax.set_ylim(y_min, y_max)
         top_bar = y_max * 0.95
 
-        # Cue and approach bars
+        # Cue and pre bars
         if not paperfigs:
-            for window, color, label in zip([cue_window, approach_window],
+            for window, color, label in zip([post_window, pre_window],
                                             ['yellow', 'magenta'],
-                                            ['cue', 'approach']):
+                                            ['cue', 'pre']):
                 if window is not None:
                     start, end = window
                     x = epoc_ts[(epoc_ts >= start) & (epoc_ts <= end)]
@@ -8577,10 +8577,10 @@ def perievent_analysis(
                 print("epoc_ts length:", len(epoc_ts))
         
         if not paperfigs:    
-            # Cue and approach bars
-            for window, color, label in zip([cue_window, approach_window],
+            # Cue and pre bars
+            for window, color, label in zip([post_window, pre_window],
                                             ['yellow', 'magenta'],
-                                            ['cue', 'approach']):
+                                            ['cue', 'pre']):
                 if window is not None:
                     start, end = window
                     x = epoc_ts[(epoc_ts >= start) & (epoc_ts <= end)]
@@ -8765,12 +8765,12 @@ def perievent_analysis(
 
             # -----------------------------
             if not paperfigs:
-                # Add cue/approach bars
+                # Add cue/pre bars
                 # -----------------------------
                 top_bar = np.nanmax([trace["mean"] + trace["sem"] for trace in per_animal_traces])
-                for window, color, label in zip([cue_window, approach_window],
+                for window, color, label in zip([post_window, pre_window],
                                                 ['yellow', 'magenta'],
-                                                ['cue', 'approach']):
+                                                ['cue', 'pre']):
                     if window is not None:
                         start, end = window
                         x = epoc_ts[(epoc_ts >= start) & (epoc_ts <= end)]
@@ -8798,10 +8798,10 @@ def perievent_analysis(
         fig_within,
         fig_onset,
         fig_trials,
-        (cue_mean, cue_sem),
+        (post_mean, post_sem),
         (auc_pre_mean, auc_pre_sem),
         (auc_post_mean, auc_post_sem),
-        (approach_mean, approach_sem),
+        (pre_mean, pre_sem),
         (onset_mean, onset_sem),
         (slope_mean, slope_sem),
         (time_to_peak_mean, time_to_peak_sem),
