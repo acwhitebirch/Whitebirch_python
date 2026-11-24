@@ -4068,7 +4068,7 @@ def dubexp_correct(ts, isos_405, GCaMP_465, tzoom, downsample_factor=10):
     bounds = ([0, 0, 0, 600, 0], [max_sig, max_sig, max_sig, 36000, 1])
 
     GCaMP_465_parms, _ = curve_fit(double_exponential, ts_ds0, GCaMP_465_ds,
-                                   p0=initial_params, bounds=bounds, maxfev=10000)
+                                   p0=initial_params, bounds=bounds, maxfev=50000) #10000
     
     # reconstruct full-resolution fit
     # now apply to the non-downsampled data
@@ -4080,7 +4080,7 @@ def dubexp_correct(ts, isos_405, GCaMP_465, tzoom, downsample_factor=10):
     initial_params = [max_sig/2, max_sig/4, max_sig/4, 3600, 0.1]
     bounds = ([0, 0, 0, 600, 0], [max_sig, max_sig, max_sig, 36000, 1])
     isos_405_parms, _ = curve_fit(double_exponential, ts_ds0, isos_405_ds,
-                                  p0=initial_params, bounds=bounds, maxfev=10000)
+                                  p0=initial_params, bounds=bounds, maxfev=50000)
     isos_405_expfit = double_exponential(ts0, *isos_405_parms)
 
     # --- Plot original signals with fits ---
